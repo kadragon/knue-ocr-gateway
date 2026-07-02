@@ -1,0 +1,11 @@
+ocr-gateway.knue.ac.kr {
+	tls /etc/caddy/certs/fullchain.pem /etc/caddy/certs/privkey.pem
+
+	request_body {
+		# Match gateway's MAX_FILE_MB so oversized uploads fail here instead
+		# of being proxied to the gateway just to be rejected there.
+		max_size 20MB
+	}
+
+	reverse_proxy gateway:8080
+}
