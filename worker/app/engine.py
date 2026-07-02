@@ -27,7 +27,14 @@ _CH_DET_MODEL_DIR = os.path.join(_PADDLEOCR_HOME, "whl", "det", "ch", "ch_PP-OCR
 
 
 def _ensure_ch_detector_downloaded() -> None:
-    """Bootstrap the 'ch' detector into the shared model cache if missing."""
+    """Bootstrap the 'ch' detector into the shared model cache if missing.
+
+    This also downloads the 'ch' recognizer/classifier, which the real
+    engine below never uses (it keeps the Korean recognizer). Fetching only
+    the detector would need reaching into paddleocr's internal model-URL
+    registry, which crashed repeatedly under manual testing in this
+    environment; the extra one-time, few-MB download is a safer trade.
+    """
     if os.path.isdir(_CH_DET_MODEL_DIR):
         return
     from paddleocr import PaddleOCR

@@ -8,6 +8,9 @@ services:
       MAX_FILE_MB: "20"
       MAX_CONCURRENCY: "4"
       API_KEY: ""
+      # No API_KEY set above -> gateway refuses to start unless this is
+      # explicitly true. Set API_KEY and drop this for any non-local deploy.
+      ALLOW_UNAUTHENTICATED: "true"
       REQUEST_TIMEOUT_SECONDS: "120"
     depends_on:
       ocr-worker:

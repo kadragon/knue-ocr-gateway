@@ -35,6 +35,10 @@ type config struct {
 	requestTimeout time.Duration
 }
 
+// loadConfig fails startup when no API_KEY is set and the operator hasn't
+// explicitly opted into running unauthenticated. This makes "no auth"
+// a deliberate choice instead of a silent default for a publicly exposed
+// upload endpoint.
 func loadConfig() config {
 	cfg := config{
 		workerURL:      getEnv("WORKER_URL", "http://ocr-worker:9000"),
@@ -42,6 +46,9 @@ func loadConfig() config {
 		maxFileBytes:   int64(getEnvInt("MAX_FILE_MB", 20)) * 1024 * 1024,
 		maxConcurrency: getEnvInt("MAX_CONCURRENCY", runtime.NumCPU()),
 		requestTimeout: time.Duration(getEnvInt("REQUEST_TIMEOUT_SECONDS", 120)) * time.Second,
+	}
+	if cfg.apiKey == "" && os.Getenv("ALLOW_UNAUTHENTICATED") != "true" {
+		log.Fatal("API_KEY is not set. Set API_KEY, or set ALLOW_UNAUTHENTICATED=true to run without auth.")
 	}
 	return cfg
 }
@@ -133,6 +140,13 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	// ParseMultipartForm spills to disk temp files once the in-memory
+	// threshold (32MB) is exceeded; the stdlib does not clean these up.
+	defer func() {
+		if r.MultipartForm != nil {
+			r.MultipartForm.RemoveAll()
+		}
+	}()
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -156,6 +170,11 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pr, pw := io.Pipe()
+	// If the request never gets sent (e.g. NewRequestWithContext fails
+	// below), nothing reads pr and the writer goroutine below blocks on
+	// io.Copy forever. Closing pr unblocks it in that case; it's a no-op
+	// once the body has already been fully read by a successful request.
+	defer pr.Close()
 	mw := multipart.NewWriter(pw)
 
 	go func() {
@@ -215,5 +234,13 @@ func main() {
 	addr := ":8080"
 	log.Printf("gateway listening on %s, worker=%s, maxConcurrency=%d, maxFileMB=%d",
 		addr, cfg.workerURL, cfg.maxConcurrency, cfg.maxFileBytes/(1024*1024))
-	log.Fatal(http.ListenAndServe(addr, mux))
+
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       cfg.requestTimeout,
+		WriteTimeout:      cfg.requestTimeout,
+	}
+	log.Fatal(httpServer.ListenAndServe())
 }

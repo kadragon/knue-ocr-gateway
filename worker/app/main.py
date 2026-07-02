@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 
@@ -40,17 +41,21 @@ async def ocr(file: UploadFile = File(...)):
 
     try:
         if ext == "pdf" or file.content_type == "application/pdf":
-            pages = pdf.extract(data)
+            # pdf.extract/engine.ocr_image are synchronous and CPU-bound
+            # (PyMuPDF rendering, PaddleOCR inference); running them inline
+            # would block the single event loop for the whole request,
+            # including /health checks from other clients.
+            pages = await asyncio.to_thread(pdf.extract, data)
         elif ext in IMAGE_EXTENSIONS or (file.content_type or "").startswith("image/"):
-            text = engine.ocr_image(data)
+            text = await asyncio.to_thread(engine.ocr_image, data)
             pages = [(1, text)]
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or file.content_type}")
     except HTTPException:
         raise
-    except Exception as exc:  # decoding/parsing failures -> explicit 422, not a bare 500
+    except Exception:  # decoding/parsing failures -> explicit 422, not a bare 500
         logger.exception("OCR processing failed for %s", file.filename)
-        raise HTTPException(status_code=422, detail=f"Failed to process file: {exc}") from exc
+        raise HTTPException(status_code=422, detail="Failed to process file") from None
 
     full_text = "\n\n".join(text for _, text in pages)
     return JSONResponse(

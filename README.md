@@ -38,7 +38,8 @@ curl -F file=@sample.png localhost:8090/ocr
 |---|---|---|
 | `MAX_FILE_MB` | 20 | 업로드 최대 크기 |
 | `MAX_CONCURRENCY` | CPU 코어 수 | 워커로 동시에 전달할 최대 요청 수 |
-| `API_KEY` | (빈 값=비활성) | 설정 시 `X-API-Key` 헤더 필요 |
+| `API_KEY` | (빈 값) | 설정 시 `X-API-Key` 헤더 필요 |
+| `ALLOW_UNAUTHENTICATED` | (없음) | `API_KEY`가 비어있을 때 무인증 기동을 명시적으로 허용. `true`가 아니면 `API_KEY` 없이는 기동 거부됨 |
 | `REQUEST_TIMEOUT_SECONDS` | 120 | 워커 응답 대기 시간 |
 
 첫 실행 시 PaddleOCR 모델을 다운로드합니다(`paddleocr-models` 볼륨에 캐시되어 재기동 시 재사용).
