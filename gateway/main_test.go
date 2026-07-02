@@ -34,7 +34,7 @@ func multipartBody(t *testing.T, filename string, content []byte) (*bytes.Buffer
 	if _, err := part.Write(content); err != nil {
 		t.Fatal(err)
 	}
-	mw.Close()
+	_ = mw.Close()
 	return buf, mw.FormDataContentType()
 }
 
@@ -94,8 +94,8 @@ func TestHandleOCRMissingFileField(t *testing.T) {
 	s := newServer(testConfig("http://unused"))
 	buf := &bytes.Buffer{}
 	mw := multipart.NewWriter(buf)
-	mw.WriteField("other", "x")
-	mw.Close()
+	_ = mw.WriteField("other", "x")
+	_ = mw.Close()
 	req := httptest.NewRequest(http.MethodPost, "/ocr", buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	req.Header.Set("X-API-Key", "secret")
@@ -131,10 +131,10 @@ func TestHandleOCRProxiesToWorker(t *testing.T) {
 			http.Error(w, "no file", http.StatusBadRequest)
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		gotFilename = header.Filename
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"text":"hello"}`))
+		_, _ = w.Write([]byte(`{"text":"hello"}`))
 	}))
 	defer worker.Close()
 
@@ -178,7 +178,7 @@ func TestHandleOCRFilePartTooLarge(t *testing.T) {
 func TestHandleOCRWorkerRetrySignalsPassThrough(t *testing.T) {
 	for _, code := range []int{http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
 		worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			io.Copy(io.Discard, r.Body)
+			_, _ = io.Copy(io.Discard, r.Body)
 			http.Error(w, "busy", code)
 		}))
 		s := newServer(testConfig(worker.URL))
@@ -197,7 +197,7 @@ func TestHandleOCRWorkerRetrySignalsPassThrough(t *testing.T) {
 
 func TestHandleOCRWorkerErrorBecomes502(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
+		_, _ = io.Copy(io.Discard, r.Body)
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer worker.Close()

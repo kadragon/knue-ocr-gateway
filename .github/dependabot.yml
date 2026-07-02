@@ -1,11 +1,11 @@
 version: 2
 updates:
-  - package-ecosystem: pip
+  - package-ecosystem: uv
     directory: /worker
     schedule:
       interval: weekly
     groups:
-      pip:
+      uv:
         patterns:
           - "*"
 

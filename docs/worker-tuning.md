@@ -43,10 +43,12 @@ full-frame copies per page — do not reintroduce it.
 
 ## Verifying dependency bumps locally (paddle/pillow/opencv)
 
-`requirements-dev.txt` excludes paddle + pillow, so `pytest` cannot catch a
-break in the OCR runtime deps. To verify a bump (e.g. a pillow major), build
-the worker image and run a real inference — but **build/run `--platform
-linux/amd64`**. On Apple-silicon (arm64) Docker, paddlepaddle 2.6.2 lacks the
+Dependencies live in `pyproject.toml`: core deps + a `dev` group (test-only)
++ an `engine` extra (paddle). `uv sync` installs core + dev **without** the
+`engine` extra, so `pytest` cannot catch a break in the OCR runtime deps. To
+verify a bump (e.g. a pillow major), build the worker image (which runs
+`uv sync --extra engine`) and run a real inference — but **build/run
+`--platform linux/amd64`**. On Apple-silicon (arm64) Docker, paddlepaddle 2.6.2 lacks the
 oneDNN backend and `_load_engine()` dies with `AnalysisConfig object has no
 attribute set_mkldnn_cache_capacity` (engine sets `enable_mkldnn=True`); prod
 is amd64 (CI `ubuntu-latest`) where this works. Smoke test: `engine.warmup()`
