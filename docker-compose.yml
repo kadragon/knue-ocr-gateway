@@ -1,16 +1,27 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/certs:/etc/caddy/certs:ro
+      - caddy-data:/data
+    depends_on:
+      - gateway
+    networks:
+      - ocrnet
+    restart: unless-stopped
+
   gateway:
     build: ./gateway
-    ports:
-      - "8090:8080"
+    expose:
+      - "8080"
     environment:
       WORKER_URL: "http://ocr-worker:9000"
       MAX_FILE_MB: "20"
       MAX_CONCURRENCY: "4"
-      API_KEY: ""
-      # No API_KEY set above -> gateway refuses to start unless this is
-      # explicitly true. Set API_KEY and drop this for any non-local deploy.
-      ALLOW_UNAUTHENTICATED: "true"
+      API_KEY: "${API_KEY:?API_KEY must be set in .env}"
       REQUEST_TIMEOUT_SECONDS: "120"
     depends_on:
       ocr-worker:
@@ -45,3 +56,5 @@ networks:
 volumes:
   paddleocr-models:
     name: knue-ocr-gateway_paddleocr-models
+  caddy-data:
+    name: knue-ocr-gateway_caddy-data
