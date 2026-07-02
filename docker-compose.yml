@@ -9,7 +9,8 @@ services:
       - ./caddy/certs:/etc/caddy/certs:ro
       - caddy-data:/data
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
     networks:
       - ocrnet
     restart: unless-stopped
@@ -27,6 +28,16 @@ services:
     depends_on:
       ocr-worker:
         condition: service_healthy
+    healthcheck:
+      # Distroless image (no shell/curl): the gateway binary probes itself.
+      test: ["CMD", "/gateway", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Graceful shutdown drains in-flight OCR requests (up to
+    # REQUEST_TIMEOUT_SECONDS); default 10s grace would SIGKILL mid-request.
+    stop_grace_period: 130s
     networks:
       - ocrnet
     restart: unless-stopped
@@ -35,8 +46,13 @@ services:
     build: ./worker
     expose:
       - "9000"
+    environment:
+      # Worker-side processing budget; keep below the gateway's
+      # REQUEST_TIMEOUT_SECONDS so abandoned jobs stop burning CPU.
+      OCR_DEADLINE_SECONDS: "110"
     volumes:
       - paddleocr-models:/root/.paddleocr
+    stop_grace_period: 130s
     deploy:
       resources:
         limits:

@@ -1,0 +1,9 @@
+# Test-only dependencies: everything needed to run pytest without installing
+# paddlepaddle/paddleocr (engine imports paddle lazily; tests mock inference).
+fastapi==0.115.6
+python-multipart==0.0.20
+pymupdf==1.25.2
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+httpx==0.28.1
+pytest==8.3.4
