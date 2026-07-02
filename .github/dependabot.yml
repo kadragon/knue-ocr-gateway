@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /worker
+    schedule:
+      interval: weekly
+    groups:
+      uv:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: /gateway
+    schedule:
+      interval: weekly
+    groups:
+      gomod:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

@@ -40,3 +40,17 @@ full-frame copies per page — do not reintroduce it.
   boxes) — the classifier must stay disabled.
 - Tests mock inference; a real-inference smoke test requires model download
   and runs only in the container.
+
+## Verifying dependency bumps locally (paddle/pillow/opencv)
+
+Dependencies live in `pyproject.toml`: core deps + a `dev` group (test-only)
++ an `engine` extra (paddle). `uv sync` installs core + dev **without** the
+`engine` extra, so `pytest` cannot catch a break in the OCR runtime deps. To
+verify a bump (e.g. a pillow major), build the worker image (which runs
+`uv sync --extra engine`) and run a real inference — but **build/run
+`--platform linux/amd64`**. On Apple-silicon (arm64) Docker, paddlepaddle 2.6.2 lacks the
+oneDNN backend and `_load_engine()` dies with `AnalysisConfig object has no
+attribute set_mkldnn_cache_capacity` (engine sets `enable_mkldnn=True`); prod
+is amd64 (CI `ubuntu-latest`) where this works. Smoke test: `engine.warmup()`
+then `engine.ocr_image(cv2.imencode('.png', <text-image>))` — expect the text
+back. pillow is transitive-only (paddleocr); no worker code imports PIL.

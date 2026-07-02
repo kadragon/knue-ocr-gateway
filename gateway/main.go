@@ -116,7 +116,7 @@ func newServer(cfg config) *server {
 // gateway's health to it would restart a healthy gateway on worker hiccups.
 func (s *server) handleLivez(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func (s *server) probeWorker(ctx context.Context) bool {
@@ -128,7 +128,7 @@ func (s *server) probeWorker(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode == http.StatusOK
 }
 
@@ -151,7 +151,7 @@ func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok"}`))
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
 
 func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +186,7 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 	// threshold (32MB) is exceeded; the stdlib does not clean these up.
 	defer func() {
 		if r.MultipartForm != nil {
-			r.MultipartForm.RemoveAll()
+			_ = r.MultipartForm.RemoveAll()
 		}
 	}()
 
@@ -195,7 +195,7 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing file field", http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	ext := extOf(header.Filename)
 	if !allowedExtensions[ext] {
@@ -223,12 +223,12 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 	// below), nothing reads pr and the writer goroutine below blocks on
 	// io.Copy forever. Closing pr unblocks it in that case; it's a no-op
 	// once the body has already been fully read by a successful request.
-	defer pr.Close()
+	defer func() { _ = pr.Close() }()
 	mw := multipart.NewWriter(pw)
 
 	go func() {
-		defer pw.Close()
-		defer mw.Close()
+		defer func() { _ = pw.Close() }()
+		defer func() { _ = mw.Close() }()
 		part, err := mw.CreateFormFile("file", header.Filename)
 		if err != nil {
 			pw.CloseWithError(err)
@@ -259,7 +259,7 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "worker unavailable", http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 503 (worker at capacity) and 504 (processing deadline) are meaningful
 	// retry signals from the worker — pass them through. Everything else
@@ -268,13 +268,13 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 		resp.StatusCode != http.StatusServiceUnavailable &&
 		resp.StatusCode != http.StatusGatewayTimeout {
 		w.WriteHeader(http.StatusBadGateway)
-		io.Copy(w, resp.Body)
+		_, _ = io.Copy(w, resp.Body)
 		return
 	}
 
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 // runHealthcheck probes the local /livez endpoint and exits 0/1. The gateway
@@ -286,7 +286,7 @@ func runHealthcheck() {
 	if err != nil {
 		os.Exit(1)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		os.Exit(1)
 	}

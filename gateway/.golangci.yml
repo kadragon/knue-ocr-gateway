@@ -1,0 +1,9 @@
+version: "2"
+
+# Static analysis for the gateway. Default linters (errcheck, govet,
+# ineffassign, staticcheck, unused) plus a few high-signal additions.
+linters:
+  enable:
+    - bodyclose
+    - misspell
+    - unconvert

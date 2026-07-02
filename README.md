@@ -69,8 +69,8 @@ curl -H "X-API-Key: $API_KEY" -F file=@sample.png https://ocr-gateway.knue.ac.kr
 ## 개발
 
 ```bash
-cd gateway && go test ./...
-cd worker && uv venv --python 3.11 .venv && uv pip install -p .venv/bin/python -r requirements-dev.txt && .venv/bin/python -m pytest tests/
+cd gateway && go test ./... && golangci-lint run ./...
+cd worker && uv sync && uv run pytest tests/
 ```
 
 테스트는 PaddleOCR 모델 없이 동작합니다(추론은 mock). CI는 push/PR마다 두 스위트를 실행합니다.
