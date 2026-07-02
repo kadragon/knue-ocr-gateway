@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -12,12 +14,24 @@ logger = logging.getLogger("ocr-worker")
 
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "tiff", "tif", "bmp", "webp"}
 
-app = FastAPI(title="knue-ocr-worker")
+# Last line of defense: the gateway's semaphore releases when its client
+# times out, but the worker thread it spawned keeps running (threads are not
+# cancellable), so under sustained timeouts the gateway cap alone does not
+# bound work queued here. Slightly above the gateway's MAX_CONCURRENCY so
+# normal operation never trips it.
+MAX_CONCURRENCY = int(os.environ.get("WORKER_MAX_CONCURRENCY", "8"))
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     engine.warmup()
+    yield
+
+
+app = FastAPI(title="knue-ocr-worker", lifespan=lifespan)
+
+# Single event loop and no await between check and increment -> no race.
+_active = 0
 
 
 @app.get("/health")
@@ -33,6 +47,17 @@ def _extension(filename: Optional[str]) -> str:
 
 @app.post("/ocr")
 async def ocr(file: UploadFile = File(...)):
+    global _active
+    if _active >= MAX_CONCURRENCY:
+        raise HTTPException(status_code=503, detail="Worker at capacity, retry later")
+    _active += 1
+    try:
+        return await _process(file)
+    finally:
+        _active -= 1
+
+
+async def _process(file: UploadFile):
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
@@ -53,6 +78,9 @@ async def ocr(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or file.content_type}")
     except HTTPException:
         raise
+    except pdf.DeadlineExceeded as e:
+        logger.warning("OCR deadline exceeded for %s: %s", file.filename, e)
+        raise HTTPException(status_code=504, detail="Processing deadline exceeded") from None
     except Exception:  # decoding/parsing failures -> explicit 422, not a bare 500
         logger.exception("OCR processing failed for %s", file.filename)
         raise HTTPException(status_code=422, detail="Failed to process file") from None

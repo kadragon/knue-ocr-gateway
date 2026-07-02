@@ -1,4 +1,7 @@
 .claude/
 .env
+.venv/
+__pycache__/
+.pytest_cache/
 caddy/certs/*
 !caddy/certs/.gitkeep
