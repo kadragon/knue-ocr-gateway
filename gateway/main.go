@@ -5,14 +5,20 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
+	"flag"
 	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -84,7 +90,15 @@ type server struct {
 	cfg  config
 	sem  chan struct{}
 	http *http.Client
+
+	// Worker health probe result, cached so the unauthenticated /health
+	// endpoint can't be used to hammer the worker with probe traffic.
+	healthMu sync.Mutex
+	healthOK bool
+	healthAt time.Time
 }
+
+const healthCacheTTL = 5 * time.Second
 
 func newServer(cfg config) *server {
 	return &server{
@@ -96,24 +110,40 @@ func newServer(cfg config) *server {
 	}
 }
 
-func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
+// handleLivez reports gateway process liveness only, without touching the
+// worker: the worker has its own container healthcheck, and coupling the
+// gateway's health to it would restart a healthy gateway on worker hiccups.
+func (s *server) handleLivez(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok"}`))
+}
 
+func (s *server) probeWorker(ctx context.Context) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.cfg.workerURL+"/health", nil)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+		return false
 	}
 	resp, err := s.http.Do(req)
 	if err != nil {
-		http.Error(w, "worker unavailable", http.StatusBadGateway)
-		return
+		return false
 	}
 	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
 
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "worker unhealthy", http.StatusBadGateway)
+func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	s.healthMu.Lock()
+	if time.Since(s.healthAt) > healthCacheTTL {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		s.healthOK = s.probeWorker(ctx)
+		s.healthAt = time.Now()
+		cancel()
+	}
+	ok := s.healthOK
+	s.healthMu.Unlock()
+
+	if !ok {
+		http.Error(w, "worker unavailable", http.StatusBadGateway)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -126,12 +156,15 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.cfg.apiKey != "" && r.Header.Get("X-API-Key") != s.cfg.apiKey {
+	if s.cfg.apiKey != "" &&
+		subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(s.cfg.apiKey)) != 1 {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.maxFileBytes)
+	// The limit applies to the whole request body; allow 1MB of multipart
+	// framing overhead so a file of exactly MAX_FILE_MB is still accepted.
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.maxFileBytes+1<<20)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		if strings.Contains(err.Error(), "http: request body too large") {
 			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
@@ -223,11 +256,34 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+// runHealthcheck probes the local /livez endpoint and exits 0/1. The gateway
+// image is distroless (no shell, no curl), so the container healthcheck
+// re-invokes this same binary with -healthcheck.
+func runHealthcheck() {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:8080/livez")
+	if err != nil {
+		os.Exit(1)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func main() {
+	healthcheck := flag.Bool("healthcheck", false, "probe the local /livez endpoint and exit")
+	flag.Parse()
+	if *healthcheck {
+		runHealthcheck()
+	}
+
 	cfg := loadConfig()
 	s := newServer(cfg)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/livez", s.handleLivez)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ocr", s.handleOCR)
 
@@ -242,5 +298,28 @@ func main() {
 		ReadTimeout:       cfg.requestTimeout,
 		WriteTimeout:      cfg.requestTimeout,
 	}
-	log.Fatal(httpServer.ListenAndServe())
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- httpServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-errCh:
+		log.Fatal(err)
+	case <-ctx.Done():
+	}
+
+	// Let in-flight OCR requests finish; compose must give the container at
+	// least this long via stop_grace_period or Docker SIGKILLs us first.
+	log.Println("shutting down, draining in-flight requests...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.requestTimeout+5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		log.Printf("shutdown error: %v", err)
+	}
+	log.Println("gateway stopped")
 }
