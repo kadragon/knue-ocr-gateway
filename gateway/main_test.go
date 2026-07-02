@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -159,6 +160,41 @@ func TestHandleOCRProxiesToWorker(t *testing.T) {
 	}
 }
 
+func TestHandleOCRFilePartTooLarge(t *testing.T) {
+	cfg := testConfig("http://unused")
+	cfg.maxFileBytes = 100
+	s := newServer(cfg)
+	body, ct := multipartBody(t, "a.pdf", bytes.Repeat([]byte("x"), 200))
+	req := httptest.NewRequest(http.MethodPost, "/ocr", body)
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set("X-API-Key", "secret")
+	rec := httptest.NewRecorder()
+	s.handleOCR(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("got %d, want 413", rec.Code)
+	}
+}
+
+func TestHandleOCRWorkerRetrySignalsPassThrough(t *testing.T) {
+	for _, code := range []int{http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.Copy(io.Discard, r.Body)
+			http.Error(w, "busy", code)
+		}))
+		s := newServer(testConfig(worker.URL))
+		body, ct := multipartBody(t, "a.pdf", []byte("x"))
+		req := httptest.NewRequest(http.MethodPost, "/ocr", body)
+		req.Header.Set("Content-Type", ct)
+		req.Header.Set("X-API-Key", "secret")
+		rec := httptest.NewRecorder()
+		s.handleOCR(rec, req)
+		if rec.Code != code {
+			t.Errorf("worker %d rewritten to %d, want pass-through", code, rec.Code)
+		}
+		worker.Close()
+	}
+}
+
 func TestHandleOCRWorkerErrorBecomes502(t *testing.T) {
 	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
@@ -205,6 +241,23 @@ func TestHandleHealthCachesWorkerProbe(t *testing.T) {
 	}
 	if n := probes.Load(); n != 1 {
 		t.Errorf("worker probed %d times within TTL, want 1", n)
+	}
+}
+
+func TestHandleHealthProbeIndependentOfCallerContext(t *testing.T) {
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer worker.Close()
+
+	s := newServer(testConfig(worker.URL))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // caller already gone when the probe runs
+	req := httptest.NewRequest(http.MethodGet, "/health", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	s.handleHealth(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("cancelled caller context poisoned the shared probe: got %d, want 200", rec.Code)
 	}
 }
 

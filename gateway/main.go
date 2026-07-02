@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
 	"flag"
@@ -134,7 +135,10 @@ func (s *server) probeWorker(ctx context.Context) bool {
 func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.healthMu.Lock()
 	if time.Since(s.healthAt) > healthCacheTTL {
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		// Independent of r.Context(): the probe result is cached and shared,
+		// so one caller disconnecting mid-probe must not poison the cache
+		// with a false negative for everyone else.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		s.healthOK = s.probeWorker(ctx)
 		s.healthAt = time.Now()
 		cancel()
@@ -156,10 +160,15 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.cfg.apiKey != "" &&
-		subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(s.cfg.apiKey)) != 1 {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
+	if s.cfg.apiKey != "" {
+		// Hash both sides first: ConstantTimeCompare short-circuits on length
+		// mismatch, which would leak the key's length via timing.
+		got := sha256.Sum256([]byte(r.Header.Get("X-API-Key")))
+		want := sha256.Sum256([]byte(s.cfg.apiKey))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
 
 	// The limit applies to the whole request body; allow 1MB of multipart
@@ -191,6 +200,13 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 	ext := extOf(header.Filename)
 	if !allowedExtensions[ext] {
 		http.Error(w, "unsupported file extension: "+ext, http.StatusBadRequest)
+		return
+	}
+
+	// MaxBytesReader above only bounds the whole body (with framing
+	// headroom); enforce MAX_FILE_MB on the file part itself.
+	if header.Size > s.cfg.maxFileBytes {
+		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -245,7 +261,12 @@ func (s *server) handleOCR(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode >= 500 {
+	// 503 (worker at capacity) and 504 (processing deadline) are meaningful
+	// retry signals from the worker — pass them through. Everything else
+	// >=500 is an internal worker failure the client shouldn't see raw.
+	if resp.StatusCode >= 500 &&
+		resp.StatusCode != http.StatusServiceUnavailable &&
+		resp.StatusCode != http.StatusGatewayTimeout {
 		w.WriteHeader(http.StatusBadGateway)
 		io.Copy(w, resp.Body)
 		return

@@ -59,8 +59,9 @@ def _page_to_bgr(page: "fitz.Page"):
     import numpy as np
     import cv2
 
-    pix = page.get_pixmap(matrix=_render_matrix(page))  # RGB, no alpha
-    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    pix = page.get_pixmap(matrix=_render_matrix(page), alpha=False)  # 3-channel RGB
+    # samples_mv is a zero-copy memoryview; .samples would copy the whole frame.
+    img = np.frombuffer(pix.samples_mv, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
 
