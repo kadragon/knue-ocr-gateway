@@ -1,0 +1,47 @@
+services:
+  gateway:
+    build: ./gateway
+    ports:
+      - "8090:8080"
+    environment:
+      WORKER_URL: "http://ocr-worker:9000"
+      MAX_FILE_MB: "20"
+      MAX_CONCURRENCY: "4"
+      API_KEY: ""
+      # No API_KEY set above -> gateway refuses to start unless this is
+      # explicitly true. Set API_KEY and drop this for any non-local deploy.
+      ALLOW_UNAUTHENTICATED: "true"
+      REQUEST_TIMEOUT_SECONDS: "120"
+    depends_on:
+      ocr-worker:
+        condition: service_healthy
+    networks:
+      - ocrnet
+    restart: unless-stopped
+
+  ocr-worker:
+    build: ./worker
+    expose:
+      - "9000"
+    volumes:
+      - paddleocr-models:/root/.paddleocr
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=5)"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - ocrnet
+    restart: unless-stopped
+
+networks:
+  ocrnet:
+
+volumes:
+  paddleocr-models:
+    name: knue-ocr-gateway_paddleocr-models
