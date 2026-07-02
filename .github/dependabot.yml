@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /worker
+    schedule:
+      interval: weekly
+    groups:
+      pip:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: /gateway
+    schedule:
+      interval: weekly
+    groups:
+      gomod:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
