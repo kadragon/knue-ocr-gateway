@@ -9,4 +9,4 @@ caddy/certs/*
 gateway/knue-ocr-gateway
 # Generated eval artifacts (generate_samples.py output + sweep results)
 worker/eval/samples/
-worker/eval/results.json
+worker/eval/results*.json
