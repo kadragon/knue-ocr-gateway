@@ -33,7 +33,7 @@ def cer_hangul_only(pred: str, truth: str) -> float:
 def main() -> None:
     truths = {}
     for txt in glob.glob(os.path.join(SAMPLES_DIR, "*.txt")):
-        with open(txt) as f:
+        with open(txt, encoding="utf-8") as f:
             truths[os.path.splitext(os.path.basename(txt))[0]] = f.read()
 
     merged = {}  # label -> {sample: entry, "_latencies": [...]}
@@ -51,13 +51,20 @@ def main() -> None:
         missing = set(truths) - set(entries)
         if missing:
             print(f"WARN {label}: missing samples {sorted(missing)}")
+        stale = set(entries) - set(truths)
+        if stale:
+            print(f"WARN {label}: skipping stale samples no longer in {SAMPLES_DIR}: {sorted(stale)}")
         cers, nospaces, hanguls = [], [], []
         for name, entry in entries.items():
+            if name in stale:
+                continue
             pred, truth = entry["pred"], truths[name]
             cers.append(cer(pred, truth))
             nospaces.append(cer_nospace(pred, truth))
             hanguls.append(cer_hangul_only(pred, truth))
-        n = len(entries)
+        n = len(cers)
+        if n == 0:
+            continue
         rows.append({
             "label": label,
             "n": n,

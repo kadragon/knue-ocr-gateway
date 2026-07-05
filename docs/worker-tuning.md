@@ -67,12 +67,12 @@ degradations, 200 DPI):
 Harness usage (host generates samples; sweep runs per-config in containers):
 
 ```bash
-cd worker && .venv/bin/python -m eval.generate_samples   # needs a Korean TTF
+(cd worker && .venv/bin/python -m eval.generate_samples)   # needs a Korean TTF
 docker build -t knue-ocr-eval ./worker
 docker run --rm -v $PWD/worker/eval:/app/eval \
   -v knue-ocr-gateway_paddleocr-models:/root/.paddleocr \
   knue-ocr-eval python -m eval.run_eval --config '{"det_limit_side_len":960,...}' --filter body10
-cd worker && .venv/bin/python -m eval.analyze            # merge + rank
+(cd worker && .venv/bin/python -m eval.analyze)            # merge + rank
 ```
 
 Real scanned pages with hand-made ground truth can be dropped into

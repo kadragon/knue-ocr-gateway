@@ -128,7 +128,7 @@ def main() -> None:
         for deg_name, degrade in DEGRADATIONS:
             name = f"{layout_name}_{deg_name}"
             cv2.imwrite(os.path.join(SAMPLES_DIR, f"{name}.png"), degrade(img))
-            with open(os.path.join(SAMPLES_DIR, f"{name}.txt"), "w") as f:
+            with open(os.path.join(SAMPLES_DIR, f"{name}.txt"), "w", encoding="utf-8") as f:
                 f.write(truth)
             count += 1
     print(f"Wrote {count} sample pairs to {SAMPLES_DIR}")

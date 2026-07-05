@@ -79,7 +79,7 @@ def _load_samples() -> List[Tuple[str, "object", str]]:
         if not os.path.isfile(txt):
             logger.warning("Skipping %s: no ground-truth .txt", name)
             continue
-        with open(txt) as f:
+        with open(txt, encoding="utf-8") as f:
             samples.append((name, cv2.imread(png), f.read()))
     if not samples:
         raise SystemExit(f"No samples in {SAMPLES_DIR}; run generate_samples.py first")
@@ -169,6 +169,8 @@ def main() -> None:
     samples = _load_samples()
     if args.filter:
         samples = [s for s in samples if args.filter in s[0]]
+        if not samples:
+            raise SystemExit(f"--filter {args.filter!r} matched no samples in {SAMPLES_DIR}")
     logger.info("Loaded %d samples", len(samples))
 
     if args.config:
@@ -187,6 +189,17 @@ def main() -> None:
             flush=True,
         )
         return
+
+    # The staged sweep runs every det_limit_side_len candidate in this one
+    # process; paddle's per-inference memory leak reliably OOM-kills it once
+    # det_limit_side_len >= 1280 is reached (see docs/worker-tuning.md). Fail
+    # fast with guidance instead of a bare OOM kill mid-sweep.
+    if max(LIMIT_CANDIDATES) >= 1280:
+        raise SystemExit(
+            "Staged sweep (no --config) OOMs at det_limit_side_len >= 1280. "
+            "Run each config in its own container instead: "
+            "--config '{\"det_limit_side_len\":...}' --filter <chunk>"
+        )
 
     results = []
     # Rank by glyph accuracy (space-insensitive), tie-break by latency.
