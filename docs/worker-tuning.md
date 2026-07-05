@@ -41,6 +41,61 @@ full-frame copies per page — do not reintroduce it.
 - Tests mock inference; a real-inference smoke test requires model download
   and runs only in the container.
 
+## Detection knobs & the eval harness
+
+`engine.py` exposes three env-tunable detection knobs:
+`OCR_DET_LIMIT_SIDE_LEN` (960), `OCR_DET_UNCLIP_RATIO` (2.0),
+`OCR_DET_BOX_THRESH` (0.6). Defaults come from a sweep with the eval harness
+in `worker/eval/` (synthetic Korean pages, 3 font sizes x 4 scan-like
+degradations, 200 DPI):
+
+- **unclip 2.0 beats the PaddleOCR default 1.5 on every metric**: hangul-only
+  CER 0.0141 -> 0.0092, worst-case 0.0317 -> 0.0168, ~18% faster (looser
+  boxes stop jongseong clipping and merge fragments into fewer rec crops).
+  2.2 measured the same (plateau); 2.0 kept for line-merge safety margin on
+  real layouts the synthetic set can't represent.
+- **Raising det_limit_side_len (1280/1600/1920) was rejected**: zero accuracy
+  gain (recognizer crops from the original-resolution image, so det input
+  size doesn't bound rec quality), 15-40% slower, and dense pages OOM — which
+  would also blow the 4g prod container cap.
+- **Error decomposition** (baseline, whitespace-collapsed CER 0.25): ~15pp is
+  dropped spaces, ~9pp dropped punctuation (`(`, `,`, `.`, `①`->`0`), and
+  only ~1.4% actual character errors. Both are korean-recognizer behaviors
+  detection knobs cannot fix; the real lever there is a PaddleOCR 3.x /
+  PP-OCRv5 migration (`korean_PP-OCRv5_mobile_rec`).
+
+Harness usage (host generates samples; sweep runs per-config in containers):
+
+```bash
+(cd worker && .venv/bin/python -m eval.generate_samples)   # needs a Korean TTF
+docker build -t knue-ocr-eval ./worker
+docker run --rm -v $PWD/worker/eval:/app/eval \
+  -v knue-ocr-gateway_paddleocr-models:/root/.paddleocr \
+  knue-ocr-eval python -m eval.run_eval --config '{"det_limit_side_len":960,...}' --filter body10
+(cd worker && .venv/bin/python -m eval.analyze)            # merge + rank
+```
+
+Real scanned pages with hand-made ground truth can be dropped into
+`eval/samples/` as `<name>.png` + `<name>.txt` pairs.
+
+Eval-run gotchas (all learned the hard way):
+- **Native arm64 works if `enable_mkldnn=False`** (eval auto-detects); the
+  amd64-emulation route is ~10x slower, OOM-prone, and can wedge the Docker
+  daemon. Prod stays amd64 + mkldnn.
+- **Importing paddleocr hijacks logging config** and silences this repo's
+  loggers — eval scripts print() instead.
+- **paddle leaks memory per inference** (worse at larger det inputs): shard
+  long runs across processes with `--filter`, one container per chunk.
+
+## Undeclared paddle dependency: setuptools
+
+paddle 2.6.2 does `import setuptools` at import time but does not declare it,
+and uv-managed venvs ship without setuptools — so a fresh image build dies at
+worker startup with `ModuleNotFoundError: No module named 'setuptools'`.
+Pinned in the `engine` extra (`pyproject.toml`). pytest cannot catch this
+class of break (tests skip the `engine` extra); only a real container run
+does — see the verification section below.
+
 ## Verifying dependency bumps locally (paddle/pillow/opencv)
 
 Dependencies live in `pyproject.toml`: core deps + a `dev` group (test-only)

@@ -20,6 +20,10 @@ dependencies = [
 engine = [
     "paddlepaddle==2.6.2",
     "paddleocr==2.9.1",
+    # paddle 2.6.2 imports setuptools at import time but doesn't declare it;
+    # uv-managed venvs don't seed setuptools, so without this pin the worker
+    # dies on `import paddle` (ModuleNotFoundError: setuptools).
+    "setuptools==80.9.0",
 ]
 
 [dependency-groups]

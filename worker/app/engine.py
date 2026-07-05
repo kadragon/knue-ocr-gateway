@@ -34,6 +34,16 @@ _CH_DET_MODEL_DIR = os.path.join(_PADDLEOCR_HOME, "whl", "det", "ch", "ch_PP-OCR
 
 _CPU_THREADS = int(os.environ.get("OCR_CPU_THREADS", os.cpu_count() or 4))
 
+# Detection knobs, tuned with the eval harness (see eval/run_eval.py and
+# docs/worker-tuning.md). unclip 2.0 (PaddleOCR default 1.5) stops Hangul
+# jongseong clipping at box edges: on the synthetic Korean set it cut
+# hangul-only CER 0.0141 -> 0.0092 and ran ~18% faster (fewer, merged rec
+# crops). Raising det_limit_side_len was rejected: no accuracy gain, slower,
+# and OOM on dense pages within the 4g container cap.
+_DET_LIMIT_SIDE_LEN = int(os.environ.get("OCR_DET_LIMIT_SIDE_LEN", "960"))
+_DET_DB_UNCLIP_RATIO = float(os.environ.get("OCR_DET_UNCLIP_RATIO", "2.0"))
+_DET_DB_BOX_THRESH = float(os.environ.get("OCR_DET_BOX_THRESH", "0.6"))
+
 _INFER_LOCK = threading.Lock()
 
 
@@ -60,7 +70,11 @@ def _load_engine():
 
     _ensure_ch_detector_downloaded()
 
-    logger.info("Loading PaddleOCR (rec=korean, det=ch, cpu_threads=%d, mkldnn)...", _CPU_THREADS)
+    logger.info(
+        "Loading PaddleOCR (rec=korean, det=ch, cpu_threads=%d, mkldnn, "
+        "det_limit=%d, unclip=%.2f, box_thresh=%.2f)...",
+        _CPU_THREADS, _DET_LIMIT_SIDE_LEN, _DET_DB_UNCLIP_RATIO, _DET_DB_BOX_THRESH,
+    )
     engine = PaddleOCR(
         lang="korean",
         det_model_dir=_CH_DET_MODEL_DIR,
@@ -68,6 +82,9 @@ def _load_engine():
         use_angle_cls=False,
         enable_mkldnn=True,
         cpu_threads=_CPU_THREADS,
+        det_limit_side_len=_DET_LIMIT_SIDE_LEN,
+        det_db_unclip_ratio=_DET_DB_UNCLIP_RATIO,
+        det_db_box_thresh=_DET_DB_BOX_THRESH,
         show_log=False,
     )
     logger.info("PaddleOCR ready.")

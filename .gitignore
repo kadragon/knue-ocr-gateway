@@ -6,3 +6,7 @@ __pycache__/
 caddy/certs/*
 !caddy/certs/.gitkeep
 .agents/
+gateway/knue-ocr-gateway
+# Generated eval artifacts (generate_samples.py output + sweep results)
+worker/eval/samples/
+worker/eval/results*.json
