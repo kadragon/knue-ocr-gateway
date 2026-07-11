@@ -5,7 +5,7 @@ description = "PaddleOCR HTTP worker for the KNUE OCR gateway"
 requires-python = "==3.11.*"
 dependencies = [
     "fastapi==0.139.0",
-    "uvicorn[standard]==0.50.0",
+    "uvicorn[standard]==0.51.0",
     "python-multipart==0.0.32",
     "pillow==12.3.0",
     "pymupdf==1.28.0",
