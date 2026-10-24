@@ -38,10 +38,31 @@ curl -H "X-API-Key: $API_KEY" -F file=@sample.png https://ocr-gateway.knue.ac.kr
 ```json
 {
   "filename": "sample.pdf",
-  "pages": [{"page": 1, "text": "..."}],
-  "text": "전체 텍스트"
+  "pages": [{"page": 1, "text": "...", "method": "ocr", "char_count": 3, "review_reasons": ["short_text"]}],
+  "text": "...",
+  "review_pages": [1]
 }
 ```
+
+### Extraction review metadata
+
+Each page includes `method` (`text_layer` or `ocr`), `char_count`, and
+`review_reasons`. `char_count` counts Unicode code points in the returned
+`text`, including whitespace. Whitespace-only or empty results receive
+`empty_text`; other results shorter than `OCR_REVIEW_MIN_CHARS` receive
+`short_text`. A result exactly at the threshold does not need review.
+`review_pages` lists the affected 1-based page numbers in document order.
+Images use the same schema with page 1 and method `ocr`.
+
+These are review hints, not proof of missing content: a blank source page may
+legitimately produce no text, and long text is not a guarantee of accuracy.
+The existing page text and combined text are preserved. Review metadata adds
+no body text or previews to logs.
+
+Set `OCR_REVIEW_MIN_CHARS` in `.env` for Docker Compose (default: `20`,
+non-negative integer). `0` disables short-text hints but retains empty-text
+hints. This setting does not change the threshold used to select OCR versus
+the text layer. Restart the worker after changing it.
 
 ## 환경 변수 (gateway)
 
@@ -61,6 +82,7 @@ curl -H "X-API-Key: $API_KEY" -F file=@sample.png https://ocr-gateway.knue.ac.kr
 | `WORKER_MAX_CONCURRENCY` | 8 | 워커 자체 동시 요청 상한 (초과 시 503) |
 | `OCR_CPU_THREADS` | CPU 코어 수 | 추론 1건이 사용하는 스레드 수 |
 | `RENDER_DPI` | 200 | 스캔 페이지 렌더링 DPI |
+| `OCR_REVIEW_MIN_CHARS` | 20 | Review results shorter than this count; 0 keeps only empty-text hints |
 
 추론은 단일 PaddleOCR 인스턴스에서 락으로 직렬화됩니다 (Paddle predictor는 thread-safe 아님 — 상세는 `docs/worker-tuning.md`).
 
