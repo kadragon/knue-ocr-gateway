@@ -50,6 +50,7 @@ services:
       # Worker-side processing budget; keep below the gateway's
       # REQUEST_TIMEOUT_SECONDS so abandoned jobs stop burning CPU.
       OCR_DEADLINE_SECONDS: "110"
+      OCR_REVIEW_MIN_CHARS: "${OCR_REVIEW_MIN_CHARS:-20}"
     volumes:
       - paddleocr-models:/root/.paddleocr
     stop_grace_period: 130s

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -73,7 +74,7 @@ async def _process(file: UploadFile):
             pages = await asyncio.to_thread(pdf.extract, data)
         elif ext in IMAGE_EXTENSIONS or (file.content_type or "").startswith("image/"):
             text = await asyncio.to_thread(engine.ocr_image, data)
-            pages = [(1, text)]
+            pages = [pdf.PageResult(1, text, "ocr")]
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or file.content_type}")
     except HTTPException:
@@ -85,11 +86,12 @@ async def _process(file: UploadFile):
         logger.exception("OCR processing failed for %s", file.filename)
         raise HTTPException(status_code=422, detail="Failed to process file") from None
 
-    full_text = "\n\n".join(text for _, text in pages)
+    full_text = "\n\n".join(page.text for page in pages)
     return JSONResponse(
         {
             "filename": file.filename,
-            "pages": [{"page": n, "text": t} for n, t in pages],
+            "pages": [asdict(page) for page in pages],
             "text": full_text,
+            "review_pages": [page.page for page in pages if page.review_reasons],
         }
     )

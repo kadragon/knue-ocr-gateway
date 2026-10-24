@@ -7,7 +7,8 @@ each page is rasterized and sent through the OCR engine instead.
 
 import os
 import time
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import List, Literal, Optional
 
 import fitz  # PyMuPDF
 
@@ -35,6 +36,30 @@ MAX_PAGES = 200
 # that queued requests need. Checked between pages; a heavily scanned PDF
 # fails with a deadline error instead of silently outliving its caller.
 DEADLINE_SECONDS = float(os.environ.get("OCR_DEADLINE_SECONDS", "110"))
+
+
+REVIEW_MIN_CHARS = int(os.environ.get("OCR_REVIEW_MIN_CHARS", "20"))
+if REVIEW_MIN_CHARS < 0:
+    raise ValueError("OCR_REVIEW_MIN_CHARS must be non-negative")
+
+
+@dataclass
+class PageResult:
+    page: int
+    text: str
+    method: Literal["text_layer", "ocr"]
+    char_count: int = field(init=False)
+    review_reasons: List[str] = field(init=False)
+
+    def __post_init__(self):
+        # Count Unicode code points in the returned text, including whitespace.
+        self.char_count = len(self.text)
+        if not self.text.strip():
+            self.review_reasons = ["empty_text"]
+        elif self.char_count < REVIEW_MIN_CHARS:
+            self.review_reasons = ["short_text"]
+        else:
+            self.review_reasons = []
 
 
 class DeadlineExceeded(Exception):
@@ -65,8 +90,8 @@ def _page_to_bgr(page: "fitz.Page"):
     return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
 
-def extract(pdf_bytes: bytes, deadline_seconds: Optional[float] = None) -> List[Tuple[int, str]]:
-    """Return a list of (page_number, text) tuples, 1-indexed.
+def extract(pdf_bytes: bytes, deadline_seconds: Optional[float] = None) -> List[PageResult]:
+    """Return page text and review metadata, with 1-indexed page numbers.
 
     Raises DeadlineExceeded when processing time exceeds deadline_seconds
     (default DEADLINE_SECONDS)."""
@@ -74,7 +99,7 @@ def extract(pdf_bytes: bytes, deadline_seconds: Optional[float] = None) -> List[
         deadline_seconds = DEADLINE_SECONDS
     start = time.monotonic()
 
-    pages: List[Tuple[int, str]] = []
+    pages: List[PageResult] = []
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         if doc.page_count > MAX_PAGES:
@@ -86,11 +111,11 @@ def extract(pdf_bytes: bytes, deadline_seconds: Optional[float] = None) -> List[
                 )
             text = page.get_text().strip()
             if len(text) >= MIN_TEXT_LEN_TO_SKIP_OCR:
-                pages.append((i, text))
+                pages.append(PageResult(i, text, "text_layer"))
                 continue
 
             ocr_text = engine.ocr_array(_page_to_bgr(page))
-            pages.append((i, ocr_text))
+            pages.append(PageResult(i, ocr_text, "ocr"))
     finally:
         doc.close()
     return pages
