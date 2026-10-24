@@ -75,6 +75,7 @@ def test_render_matrix_caps_oversized_pages():
 
 
 def test_mixed_pdf_review_metadata(monkeypatch):
+    monkeypatch.setattr(pdf, "REVIEW_MIN_CHARS", 20)
     doc = fitz.open()
     doc.new_page().insert_text((72, 72), DIGITAL_TEXT)
     scan = fitz.open(stream=make_pdf([DIGITAL_TEXT]), filetype="pdf")
@@ -109,3 +110,12 @@ def test_zero_threshold_keeps_empty_review(monkeypatch):
     monkeypatch.setattr(pdf, "REVIEW_MIN_CHARS", 0)
     assert pdf.PageResult(1, "x", "ocr").review_reasons == []
     assert pdf.PageResult(2, "", "ocr").review_reasons == ["empty_text"]
+
+
+def test_review_count_includes_line_separators(monkeypatch):
+    monkeypatch.setattr(pdf, "REVIEW_MIN_CHARS", 20)
+    text = "\n".join("abcdefghijk")
+    page = pdf.PageResult(1, text, "ocr")
+    assert page.char_count == 21
+    assert page.review_reasons == []
+    assert page.text == text

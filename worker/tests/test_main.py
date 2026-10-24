@@ -8,6 +8,7 @@ from app import engine, main, pdf
 def client(monkeypatch):
     # Warmup would load PaddleOCR models; tests never run real inference.
     monkeypatch.setattr(engine, "warmup", lambda: None)
+    monkeypatch.setattr(pdf, "REVIEW_MIN_CHARS", 20)
     with TestClient(main.app) as c:
         yield c
 
